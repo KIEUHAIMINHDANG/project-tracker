@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Neon Kanban Project Tracker</title>
+  <title>Neon Kanban Project Tracker</title>
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Roboto Mono font -->
@@ -20,7 +20,7 @@
 <body class="min-h-screen p-4">
   <div class="mx-auto w-full max-w-6xl space-y-8">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <h1 class="text-3xl font-semibold text-[#39ff14]">⚡ Neon Kanban</h1>
+      <h1 class="text-3xl font-semibold text-[#39ff14]">⚡ Neon Kanban</h1>
       <div class="flex gap-3">
         <input id="filterInput" placeholder="Filter…" class="rounded bg-[#222] p-2 text-sm text-[#d0ffd7] placeholder-gray-500" />
         <button id="refreshBtn" class="rounded bg-[#0069ff] px-4 py-2 text-white">Refresh</button>
@@ -43,17 +43,21 @@
 
   <!-- Troubleshoot overlay -->
   <div id="errorOverlay" class="fixed inset-0 hidden items-center justify-center bg-[#000a] p-4 text-sm text-white">
-    <div class="max-w-xl rounded-lg bg-[#1b1b1b] p-6 shadow-lg">
-      <h3 class="mb-2 text-xl font-semibold text-red-400">Failed to contact Apps Script</h3>
-      <ul class="list-disc space-y-1 pl-5">
-        <li>Apps Script deployment type = <b>Web app</b></li>
-        <li><b>Execute as</b> = Me   |   <b>Who has access</b> = Anyone</li>
-        <li>`scriptURL` copied exactly (no extra quotes/spaces)</li>
-        <li>Spreadsheet has tabs <em>Projects</em> and <em>Tasks</em> with correct headers</li>
-      </ul>
-      <div class="mt-4 flex gap-3">
+    <div class="max-w-xl rounded-lg bg-[#1b1b1b] p-6 shadow-lg space-y-4">
+      <div>
+        <h3 class="mb-2 text-xl font-semibold text-red-400">Failed to load data</h3>
+        <p class="text-gray-300">Raw response from server:</p>
+        <pre id="rawResp" class="whitespace-pre-wrap break-words bg-[#111] p-2 rounded text-xs max-h-40 overflow-auto"></pre>
+      </div>
+      <ol class="list-decimal space-y-1 pl-5 text-gray-400 text-xs">
+        <li>Apps Script deployment: <b>Web app</b> · Access: <b>Anyone</b></li>
+        <li>Spreadsheet sheets named <em>Projects</em> &amp; <em>Tasks</em> with headers.</li>
+        <li>`scriptURL` in this file matches latest deployment URL.</li>
+        <li>If CORS blocked, check browser console for errors.</li>
+      </ol>
+      <div class="flex gap-3 justify-end">
         <button id="retryBtn" class="rounded bg-[#0069ff] px-4 py-2">🔄 Retry</button>
-        <button onclick="this.parentNode.parentNode.classList.add('hidden')" class="rounded bg-[#555] px-4 py-2">Close</button>
+        <button id="closeErr" class="rounded bg-[#555] px-4 py-2">Close</button>
       </div>
     </div>
   </div>
@@ -61,34 +65,32 @@
 <script>
 /**************** CONFIG ****************/
 const scriptURL = 'https://script.google.com/macros/s/AKfycbxlmUnmpYsX0QiF41TH-AEzT_t-4Ocs3EI0RTt1yCYrKfJ-0BqQYju88wFXSDD_N8vs/exec';
-const LS_KEY = 'neonKanbanCache'; // fallback cache when offline
+const LS_KEY = 'neonKanbanCache';
 
 /**************** STATE ****************/
 const DB = { projects: [], tasks: [] };
-let saveTimer = null;
 let filter = '';
 
 /**************** HELPERS ****************/
-const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
-const daysLeft = (d) => { if(!d) return NaN; const today=new Date(); today.setHours(0,0,0,0); return Math.ceil((new Date(d)-today)/86400000); };
-const badgeText = (n) => isNaN(n)?'∞':n<0?`${-n}\u00A0d overdue`:`${n}\u00A0d left`;
+const genId = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
+const daysLeft = d=>{if(!d)return NaN;const t=new Date();t.setHours(0,0,0,0);return Math.ceil((new Date(d)-t)/86400000)};
+const badgeText = n=>isNaN(n)?'∞':n<0?`${-n}d overdue`:`${n}d left`;
 
 /**************** RENDER ****************/
 function render(){
-  const root=document.getElementById('board'); root.innerHTML='';
-  const cols=['todo','doing','done'], titles={todo:'To‑Do',doing:'Doing',done:'Done'};
-  cols.forEach(col=>{
-    const div=document.createElement('div');div.dataset.col=col;
-    div.className='space-y-3 p-3 bg-[#1b1b1b] rounded-lg min-h-[300px]';
-    div.innerHTML=`<h3 class="text-lg font-medium text-[#39ff14] mb-2">${titles[col]}</h3>`;
-    root.appendChild(div);
+  const root=document.getElementById('board');root.innerHTML='';
+  const cols=['todo','doing','done'],title={todo:'To‑Do',doing:'Doing',done:'Done'};
+  cols.forEach(c=>{
+    const wrap=document.createElement('div');wrap.dataset.col=c;wrap.className='space-y-3 p-3 bg-[#1b1b1b] rounded-lg min-h-[300px]';
+    wrap.innerHTML=`<h3 class="text-lg font-medium text-[#39ff14] mb-2">${title[c]}</h3>`;
+    root.appendChild(wrap);
   });
-  DB.tasks
-    .filter(t=>!filter||t.name.toLowerCase().includes(filter)|| (t.description||'').toLowerCase().includes(filter))
+  DB.tasks.filter(t=>!filter||t.name.toLowerCase().includes(filter)|| (t.description||'').toLowerCase().includes(filter))
     .sort((a,b)=>daysLeft(a.deadline)-daysLeft(b.deadline))
     .forEach(t=>{
-      const col=document.querySelector(`[data-col="${t.status||'todo'}"]`); if(!col) return;
-      const card=document.createElement('div'); card.className='card rounded bg-[#222] p-3 text-sm';
+      const col=document.querySelector(`[data-col="${t.status||'todo'}"]`);
+      if(!col) return;
+      const card=document.createElement('div');card.className='card rounded bg-[#222] p-3 text-sm';
       const d=daysLeft(t.deadline);
       card.innerHTML=`<div class="flex justify-between items-start"><span contenteditable="true" class="font-medium text-[#eaffea]" onblur="editField('${t.id}','name',this.textContent)">${t.name}</span><button onclick="moveTask('${t.id}')" class="text-[#39ff14] text-lg">&rarr;</button></div><div contenteditable="true" class="text-xs text-gray-400" onblur="editField('${t.id}','description',this.textContent)">${t.description||''}</div><div onclick="pickDate('${t.id}',this)" class="mt-1 inline-block rounded px-2 py-1 text-xs ${d<=2?'bg-[#ff0033]':'bg-[#004d26]'} cursor-pointer">${badgeText(d)}</div>`;
       col.appendChild(card);
@@ -96,22 +98,34 @@ function render(){
 }
 
 /**************** MUTATIONS ****************/
-function editField(id,key,val){ const t=DB.tasks.find(x=>x.id===id); if(t){t[key]=val.trim(); queueSave();}}
-function pickDate(id,badge){ const t=DB.tasks.find(x=>x.id===id); if(!t) return; const inp=document.createElement('input'); inp.type='date'; inp.value=t.deadline||''; inp.onblur=()=>{t.deadline=inp.value; queueSave(); render();}; badge.replaceWith(inp); inp.focus(); }
-function moveTask(id){ const t=DB.tasks.find(x=>x.id===id); if(!t) return; t.status=t.status==='todo'?'doing':t.status==='doing'?'done':'todo'; queueSave(); render(); }
+function editField(id,key,val){const t=DB.tasks.find(x=>x.id===id);if(t){t[key]=val.trim();saveCloud();}}
+function pickDate(id,b){const t=DB.tasks.find(x=>x.id===id);if(!t)return;const inp=document.createElement('input');inp.type='date';inp.value=t.deadline||'';inp.onblur=()=>{t.deadline=inp.value||'';render();saveCloud();};b.replaceWith(inp);inp.focus();}
+function moveTask(id){const t=DB.tasks.find(x=>x.id===id);if(!t)return;t.status=t.status==='todo'?'doing':t.status==='doing'?'done':'todo';render();saveCloud();}
 
 /**************** CLOUD ****************/
 async function loadCloud(){
   try{
     const res=await fetch(`${scriptURL}?action=read`);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text=await res.text();
-    const data=JSON.parse(text||'{}');
+    const txt=await res.text();
+    console.log('Raw response:',txt.slice(0,120)+'…');
+    const data=JSON.parse(txt||'{}');
     DB.projects=Array.isArray(data.projects)?data.projects:[];
-    DB.tasks   =Array.isArray(data.tasks)   ?data.tasks   :[];
+    DB.tasks=Array.isArray(data.tasks)?data.tasks:[];
     localStorage.setItem(LS_KEY,JSON.stringify(DB));
     document.getElementById('errorOverlay').classList.add('hidden');
     render();
   }catch(err){
-    console.error('Fetch error:',err);
-    const cached=localStorage.getItem(LS
+    console.error(err);
+    const cache=localStorage.getItem(LS_KEY);
+    if(cache){Object.assign(DB,JSON.parse(cache));render();}
+    document.getElementById('rawResp').textContent=(err instanceof SyntaxError?err.message:'')||'No/parsing error';
+    document.getElementById('errorOverlay').classList.remove('hidden');
+  }
+}
+async function saveCloud(){
+  document.getElementById('syncBadge').classList.remove('hidden');
+  await fetch(scriptURL,{method:'POST',body:JSON.stringify({action:'write',projects:DB.projects,tasks:DB.tasks})}).catch(console.error);
+  document.getElementById('syncBadge').classList.add('hidden');
+}
+
+/**************** UI EVENTS ****************/
