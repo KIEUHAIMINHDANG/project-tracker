@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neon‑Kanban Project Tracker</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Roboto Mono font -->
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ===== Carbon‑fibre dark matte + high‑contrast neon ===== */
+    body{
+      background:#0b0b0b;
+      background-image:repeating-linear-gradient(45deg,#141414 0 10px,#0b0b0b 10px 20px);
+      font-family:'Roboto Mono',monospace;
+      color:#ccffd7;
+      transition:background 0.4s ease;
+    }
+    /* Scrollbar */
+    ::-webkit-scrollbar{height:8px;width:8px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:#444;border-radius:4px}
+    /* Editable outline */
+    [contenteditable="true"]{outline:1px dashed transparent;transition:outline .15s}[contenteditable="true"]:focus{outline:1px dashed #39ff14}
+    /* Card glow animation */
+    .card{transition:transform .2s,box-shadow .2s;}
+    .card:hover{transform:translateY(-4px) scale(1.02);box-shadow:0 0 12px #39ff14aa;}
+    /* Column pulse on drag */
+    @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(57,255,20,0.6);}50%{box-shadow:0 0 12px 4px rgba(57,255,20,0.4);}}
+    .drag-target{animation:pulse 1s ease-in-out infinite;}
+    /* Badge pulse for ≤2 days */
+    @keyframes badgePulse{0%,100%{transform:scale(1);}50%{transform:scale(1.1);}}
+    .urgent{animation:badgePulse 2s infinite;}
+  </style>
+</head>
+<body class="min-h-screen p-4">
+  <div class="mx-auto w-full max-w-7xl space-y-8">
+    <header class="flex flex-col items-start justify-between gap-4 md:flex-row md:items-center">
+      <div class="flex items-center gap-3">
+        <h1 class="text-3xl font-semibold text-[#39ff14]">⚡ Neon Kanban Tracker</h1>
+        <!-- Board‑wide Filter -->
+        <input id="filterInput" placeholder="Filter…" class="rounded bg-[#1e1e1e] p-2 text-sm text-[#e0ffe8] placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#39ff14]" />
+      </div>
+      <div class="flex gap-3">
+        <button id="refreshBtn" class="rounded bg-[#007bff] px-4 py-2 text-white hover:bg-[#3399ff] transition">🔄 Refresh</button>
+        <span id="syncBadge" class="hidden rounded bg-[#004d26] px-3 py-2 text-sm text-[#39ff14]">Saved ✓</span>
+      </div>
+    </header>
+
+    <!-- Add Project -->
+    <section class="rounded-lg bg-[#141414] p-4 shadow-lg">
+      <h2 class="mb-4 text-xl font-medium text-[#39ff14]">➕ New Project</h2>
+      <div class="flex flex-col gap-3 md:flex-row md:items-end">
+        <input id="newProjectName" type="text" placeholder="Project name" class="flex-1 rounded bg-[#222] p-2 text-white placeholder-gray-500" />
+        <input id="newProjectDeadline" type="date" class="w-44 rounded bg-[#222] p-2 text-white" />
+        <input id="newProjectDesc" type="text" placeholder="Description" class="flex-1 rounded bg-[#222] p-2 text-white placeholder-gray-500" />
+        <button id="addProjectBtn" class="rounded bg-[#28a745] px-4 py-2 text-white hover:bg-[#3cc15e] transition">Add</button>
+      </div>
+    </section>
+
+    <!-- Projects mount here -->
+    <section id="projectsContainer" class="space-y-8"></section>
+  </div>
+
+  <script>
+  /************ CONFIG ************/
+  const scriptURL='https://script.google.com/macros/s/AKfycbxlmUnmpYsX0QiF41TH-AEzT_t-4Ocs3EI0RTt1yCYrKfJ-0BqQYju88wFXSDD_N8vs/exec';
+
+  /************ Helpers ************/
+  const randomID=()=>`${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+  const daysBetween=d=>{if(!d)return NaN;const t=new Date();t.setHours(0,0,0,0);return Math.ceil((new Date(d)-t)/86400000)};
+  const prettyCountdown=n=>isNaN(n)?'∞':n<0?`${-n}d overdue`:`${n}d left`;
+  const isUrgent=n=>!isNaN(n)&&n<=2;
+
+  let DB={projects:[],tasks:[]};
+  let saveTimer,filterTerm='';
+
+  /************ Rendering (unchanged) ************/
+  // ... (render functions stay as before) ...
+
+  /************ Date editor ************/
+  function editDate(obj,badgeEl){
+    const input=document.createElement('input');input.type='date';input.value=obj.deadline||'';input.className='rounded bg-[#333] p-1 text-xs text-white mt-1';
+    input.onblur=()=>{obj.deadline=input.value;queueSave();render();};badgeEl.replaceWith(input);input.focus();}
+
+  /************ Cloud I/O (UPDATED for credentials) ************/
+  async function loadCloud(){
+    try{
+      const res=await fetch(`${scriptURL}?action=read`,{credentials:'include'});
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const data=await res.json();
+      DB.projects=data.projects||[];
+      DB.tasks=(data.tasks||[]).map(t=>({...t,status:t.status||(t.completed?'done':'todo')}));
+      render();
+    }catch(e){console.error(e);alert('Load failed – are you logged into the owner Google account?');}}
+
+  async function saveCloud(){
+    try{
+      document.getElementById('syncBadge').classList.remove('hidden');
+      await fetch(scriptURL,{method:'POST',credentials:'include',body:JSON.stringify({action:'write',projects:DB.projects,tasks:DB.tasks})});
+      const b=document.getElementById('syncBadge');b.textContent='Saved ✓';setTimeout(()=>b.classList.add('hidden'),2000);
+    }catch(e){console.error(e);alert('Save failed');}}
+  function queueSave(){clearTimeout(saveTimer);saveTimer=setTimeout(saveCloud,400);}
+
+  /************ Init + Events ************/
+  document.getElementById('addProjectBtn').onclick=()=>{const name=document.getElementById('newProjectName').value.trim();if(!name)return;DB.projects.push({id:randomID(),name,deadline:document.getElementById('newProjectDeadline').value,description:document.getElementById('newProjectDesc').value.trim()});['newProjectName','newProjectDeadline','newProjectDesc'].forEach(id=>document.getElementById(id).value='');queueSave();render();};
+  document.getElementById('refreshBtn').onclick=loadCloud;
+  document.getElementById('filterInput').oninput=e=>{filterTerm=e.target.value;render();};
+  loadCloud();
+  </script>
+</body>
+</html>
