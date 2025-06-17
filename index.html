@@ -46,14 +46,14 @@
     <div class="max-w-xl rounded-lg bg-[#1b1b1b] p-6 shadow-lg space-y-4">
       <div>
         <h3 class="mb-2 text-xl font-semibold text-red-400">Failed to load data</h3>
-        <p class="text-gray-300">Raw response from server:</p>
+        <p class="text-gray-300">Raw response / error:</p>
         <pre id="rawResp" class="whitespace-pre-wrap break-words bg-[#111] p-2 rounded text-xs max-h-40 overflow-auto"></pre>
       </div>
       <ol class="list-decimal space-y-1 pl-5 text-gray-400 text-xs">
-        <li>Apps Script deployment: <b>Web app</b> · Access: <b>Anyone</b></li>
-        <li>Spreadsheet sheets named <em>Projects</em> &amp; <em>Tasks</em> with headers.</li>
-        <li>`scriptURL` in this file matches latest deployment URL.</li>
-        <li>If CORS blocked, check browser console for errors.</li>
+        <li>Apps Script deployment = <b>Web app</b>, Access = <b>Anyone</b></li>
+        <li>Spreadsheet owns tabs <em>Projects</em> &amp; <em>Tasks</em> with correct headers.</li>
+        <li>`scriptURL` in this file matches latest deployment.</li>
+        <li>If quota/auth error, check browser console.</li>
       </ol>
       <div class="flex gap-3 justify-end">
         <button id="retryBtn" class="rounded bg-[#0069ff] px-4 py-2">🔄 Retry</button>
@@ -65,23 +65,27 @@
 <script>
 /**************** CONFIG ****************/
 const scriptURL = 'https://script.google.com/macros/s/AKfycbxlmUnmpYsX0QiF41TH-AEzT_t-4Ocs3EI0RTt1yCYrKfJ-0BqQYju88wFXSDD_N8vs/exec';
-const LS_KEY = 'neonKanbanCache';
+const LS_KEY   = 'neonKanbanCache';
 
 /**************** STATE ****************/
 const DB = { projects: [], tasks: [] };
 let filter = '';
 
 /**************** HELPERS ****************/
-const genId = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
-const daysLeft = d=>{if(!d)return NaN;const t=new Date();t.setHours(0,0,0,0);return Math.ceil((new Date(d)-t)/86400000)};
-const badgeText = n=>isNaN(n)?'∞':n<0?`${-n}d overdue`:`${n}d left`;
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+const daysLeft = d => { if(!d) return NaN; const t=new Date(); t.setHours(0,0,0,0); return Math.ceil((new Date(d)-t)/86400000) };
+const badgeText = n => isNaN(n) ? '∞' : n<0 ? `${-n}d overdue` : `${n}d left`;
 
 /**************** RENDER ****************/
 function render(){
-  const root=document.getElementById('board');root.innerHTML='';
-  const cols=['todo','doing','done'],title={todo:'To‑Do',doing:'Doing',done:'Done'};
+  const root=document.getElementById('board');
+  root.innerHTML='';
+  const cols=['todo','doing','done'];
+  const title={todo:'To‑Do',doing:'Doing',done:'Done'};
   cols.forEach(c=>{
-    const wrap=document.createElement('div');wrap.dataset.col=c;wrap.className='space-y-3 p-3 bg-[#1b1b1b] rounded-lg min-h-[300px]';
+    const wrap=document.createElement('div');
+    wrap.dataset.col=c;
+    wrap.className='space-y-3 p-3 bg-[#1b1b1b] rounded-lg min-h-[300px]';
     wrap.innerHTML=`<h3 class="text-lg font-medium text-[#39ff14] mb-2">${title[c]}</h3>`;
     root.appendChild(wrap);
   });
@@ -90,42 +94,43 @@ function render(){
     .forEach(t=>{
       const col=document.querySelector(`[data-col="${t.status||'todo'}"]`);
       if(!col) return;
-      const card=document.createElement('div');card.className='card rounded bg-[#222] p-3 text-sm';
+      const card=document.createElement('div');
+      card.className='card rounded bg-[#222] p-3 text-sm';
       const d=daysLeft(t.deadline);
-      card.innerHTML=`<div class="flex justify-between items-start"><span contenteditable="true" class="font-medium text-[#eaffea]" onblur="editField('${t.id}','name',this.textContent)">${t.name}</span><button onclick="moveTask('${t.id}')" class="text-[#39ff14] text-lg">&rarr;</button></div><div contenteditable="true" class="text-xs text-gray-400" onblur="editField('${t.id}','description',this.textContent)">${t.description||''}</div><div onclick="pickDate('${t.id}',this)" class="mt-1 inline-block rounded px-2 py-1 text-xs ${d<=2?'bg-[#ff0033]':'bg-[#004d26]'} cursor-pointer">${badgeText(d)}</div>`;
+      card.innerHTML=`<div class="flex justify-between items-start"><span contenteditable="true" class="font-medium text-[#eaffea]" onblur="editField('${t.id}','name',this.textContent)">${t.name}</span><button onclick="moveTask('${t.id}')" class="text-[#39ff14] text-lg">&rarr;</button></div><div contenteditable="true" class="text-xs text-gray-400" onblur="editField('${t.id}','description',this.textContent)">${t.description||''}</div><div onclick="pickDate('${t.id}',this)" class="mt-1 inline-block rounded px-2 py-1 text-xs ${(d<=2?'bg-[#ff0033]':'bg-[#004d26]')} cursor-pointer">${badgeText(d)}</div>`;
       col.appendChild(card);
     });
 }
 
 /**************** MUTATIONS ****************/
-function editField(id,key,val){const t=DB.tasks.find(x=>x.id===id);if(t){t[key]=val.trim();saveCloud();}}
-function pickDate(id,b){const t=DB.tasks.find(x=>x.id===id);if(!t)return;const inp=document.createElement('input');inp.type='date';inp.value=t.deadline||'';inp.onblur=()=>{t.deadline=inp.value||'';render();saveCloud();};b.replaceWith(inp);inp.focus();}
-function moveTask(id){const t=DB.tasks.find(x=>x.id===id);if(!t)return;t.status=t.status==='todo'?'doing':t.status==='doing'?'done':'todo';render();saveCloud();}
+function editField(id,key,val){
+  const t=DB.tasks.find(x=>x.id===id);
+  if(t){t[key]=val.trim();saveCloud();}
+}
+function pickDate(id,el){
+  const t=DB.tasks.find(x=>x.id===id);
+  if(!t) return;
+  const inp=document.createElement('input');
+  inp.type='date'; inp.value=t.deadline||'';
+  inp.onblur=()=>{t.deadline=inp.value||''; render(); saveCloud();};
+  el.replaceWith(inp); inp.focus();
+}
+function moveTask(id){
+  const t=DB.tasks.find(x=>x.id===id);
+  if(!t) return;
+  t.status = t.status==='todo' ? 'doing' : t.status==='doing' ? 'done' : 'todo';
+  render();
+  saveCloud();
+}
 
 /**************** CLOUD ****************/
 async function loadCloud(){
   try{
     const res=await fetch(`${scriptURL}?action=read`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const txt=await res.text();
     console.log('Raw response:',txt.slice(0,120)+'…');
-    const data=JSON.parse(txt||'{}');
+    const data=txt?JSON.parse(txt):{};
     DB.projects=Array.isArray(data.projects)?data.projects:[];
-    DB.tasks=Array.isArray(data.tasks)?data.tasks:[];
-    localStorage.setItem(LS_KEY,JSON.stringify(DB));
-    document.getElementById('errorOverlay').classList.add('hidden');
-    render();
-  }catch(err){
-    console.error(err);
-    const cache=localStorage.getItem(LS_KEY);
-    if(cache){Object.assign(DB,JSON.parse(cache));render();}
-    document.getElementById('rawResp').textContent=(err instanceof SyntaxError?err.message:'')||'No/parsing error';
-    document.getElementById('errorOverlay').classList.remove('hidden');
-  }
-}
-async function saveCloud(){
-  document.getElementById('syncBadge').classList.remove('hidden');
-  await fetch(scriptURL,{method:'POST',body:JSON.stringify({action:'write',projects:DB.projects,tasks:DB.tasks})}).catch(console.error);
-  document.getElementById('syncBadge').classList.add('hidden');
-}
-
-/**************** UI EVENTS ****************/
+    DB.tasks   =Array.isArray(data.tasks)   ?data.tasks   :[];
+    localStorage.setItem(LS
